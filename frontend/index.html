@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Voice Presenter</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- ================= TOPIC SCREEN ================= -->
+  <section class="topic-screen" id="topic-screen">
+    <!-- Aesthetic animated AI hero (self-contained SVG) -->
+    <div class="hero" aria-hidden="true">
+      <svg viewBox="0 0 240 240" class="hero-svg" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <radialGradient id="core" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#a5b4fc" />
+            <stop offset="45%" stop-color="#6366f1" />
+            <stop offset="100%" stop-color="#0ea5e9" />
+          </radialGradient>
+          <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#22d3ee" />
+            <stop offset="100%" stop-color="#6366f1" />
+          </linearGradient>
+          <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="7" result="b" />
+            <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+        </defs>
+
+        <!-- orbiting rings -->
+        <g class="ring ring1" filter="url(#glow)">
+          <ellipse cx="120" cy="120" rx="92" ry="34" fill="none" stroke="url(#ring)" stroke-width="1.6" opacity="0.55" />
+        </g>
+        <g class="ring ring2" filter="url(#glow)">
+          <ellipse cx="120" cy="120" rx="34" ry="92" fill="none" stroke="url(#ring)" stroke-width="1.6" opacity="0.45" />
+        </g>
+        <g class="ring ring3" filter="url(#glow)">
+          <circle cx="120" cy="120" r="78" fill="none" stroke="url(#ring)" stroke-width="1" stroke-dasharray="3 9" opacity="0.5" />
+        </g>
+
+        <!-- glowing core -->
+        <circle class="core" cx="120" cy="120" r="40" fill="url(#core)" filter="url(#glow)" />
+        <circle class="core-inner" cx="120" cy="120" r="22" fill="#e0e7ff" opacity="0.9" />
+
+        <!-- orbiting particles -->
+        <g class="orbit orbitA"><circle cx="120" cy="28" r="4" fill="#22d3ee" filter="url(#glow)" /></g>
+        <g class="orbit orbitB"><circle cx="120" cy="212" r="3" fill="#a5b4fc" filter="url(#glow)" /></g>
+        <g class="orbit orbitC"><circle cx="28" cy="120" r="3.4" fill="#6366f1" filter="url(#glow)" /></g>
+      </svg>
+    </div>
+
+    <h1 class="topic-title">What should I present?</h1>
+    <p class="topic-sub">Enter any topic — I'll build a slide deck and pitch it by voice.</p>
+
+    <form class="topic-form" id="topic-form">
+      <input
+        id="topic-input"
+        type="text"
+        placeholder="e.g. The Solar System, Quantum Computing, The French Revolution…"
+        autocomplete="off"
+      />
+      <button type="submit" id="generate-btn">Generate &amp; Present</button>
+    </form>
+
+    <div class="or-divider"><span>or</span></div>
+
+    <label class="upload-btn" id="upload-label">
+      📄 Upload a .pptx
+      <input type="file" id="file-input" accept=".pptx" hidden />
+    </label>
+
+    <p class="topic-msg" id="topic-msg"></p>
+  </section>
+
+  <!-- ================= DECK SCREEN ================= -->
+  <main class="stage" id="deck-screen" hidden>
+    <div class="deck-head">
+      <span class="deck-title" id="deck-title"></span>
+      <div class="present-controls">
+        <button type="button" id="present-btn" class="present">▶ Present</button>
+        <button type="button" id="pause-btn" class="ghost" hidden>⏸ Pause</button>
+        <button type="button" id="stop-btn" class="ghost" hidden>⏹ Stop</button>
+        <button type="button" id="new-topic" class="ghost">↺ New topic</button>
+      </div>
+    </div>
+
+    <div class="dots" id="dots" aria-hidden="true"></div>
+
+    <section class="slide" id="slide" aria-live="polite">
+      <span class="kicker" id="kicker"></span>
+      <h1 id="title"></h1>
+      <ul id="bullets"></ul>
+      <p class="note" id="note"></p>
+    </section>
+
+    <nav class="controls">
+      <button type="button" id="prev" aria-label="Previous slide">&larr; Prev</button>
+      <span class="counter"><span id="current">1</span> / <span id="total">6</span></span>
+      <button type="button" id="next" aria-label="Next slide">Next &rarr;</button>
+    </nav>
+
+    <p class="hint">Use the buttons or your &larr; / &rarr; arrow keys</p>
+
+    <p class="heard" id="heard" hidden></p>
+
+    <div class="answer" id="answer" hidden>
+      <span class="answer-label">Presenter</span>
+      <p id="answer-text"></p>
+    </div>
+
+    <form class="ask" id="ask">
+      <button type="button" id="mic-btn" class="mic" aria-label="Talk">🎤 Talk</button>
+      <input id="ask-input" type="text" placeholder="Ask a question…  (or click the mic and speak)" autocomplete="off" />
+      <button type="submit" id="ask-send">Ask</button>
+    </form>
+
+    <label class="mute-opt"><input type="checkbox" id="mute-mic" /> Mute mic while the AI speaks (for no headphones)</label>
+
+    <p class="conn" id="conn">◍ connecting…</p>
+  </main>
+
+  <script src="audio.js"></script>
+  <script src="mic.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

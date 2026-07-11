@@ -1,0 +1,11 @@
+# --- Core: the brain + backend ---
+# Azure OpenAI gpt-realtime is reached as JSON events over a websocket,
+# so we only need the websockets client — no vendor SDK required.
+websockets
+python-dotenv
+fastapi
+uvicorn[standard]
+
+# --- Uploads (Phase 11): parse an uploaded .pptx into slides ---
+python-pptx
+python-multipart
