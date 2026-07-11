@@ -11,6 +11,10 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* The `hidden` attribute must win over our display:flex rules, or the topic
+   and deck screens both show at once. */
+[hidden] { display: none !important; }
+
 html, body { height: 100%; }
 
 body {
