@@ -3,12 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Voice Presenter</title>
+  <title>Pitcher — AI Voice Presenter</title>
+  <link rel="icon" type="image/svg+xml" href="logo.svg" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <!-- ================= TOPIC SCREEN ================= -->
   <section class="topic-screen" id="topic-screen">
+    <div class="brand">
+      <img src="logo.svg" alt="Pitcher" class="brand-mark" width="36" height="36" />
+      <span class="brand-name">Pitcher</span>
+    </div>
+
     <!-- Aesthetic animated AI hero (self-contained SVG) -->
     <div class="hero" aria-hidden="true">
       <svg viewBox="0 0 240 240" class="hero-svg" xmlns="http://www.w3.org/2000/svg">
@@ -76,7 +82,10 @@
   <!-- ================= DECK SCREEN ================= -->
   <main class="stage" id="deck-screen" hidden>
     <div class="deck-head">
-      <span class="deck-title" id="deck-title"></span>
+      <div class="deck-brand">
+        <img src="logo.svg" alt="Pitcher" class="brand-mark-sm" width="24" height="24" />
+        <span class="deck-title" id="deck-title"></span>
+      </div>
       <div class="present-controls">
         <button type="button" id="present-btn" class="present">▶ Present</button>
         <button type="button" id="pause-btn" class="ghost" hidden>⏸ Pause</button>

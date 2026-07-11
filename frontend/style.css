@@ -45,6 +45,29 @@ body {
 }
 .topic-screen.busy { opacity: 0.85; }
 
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.brand-mark {
+  border-radius: 9px;
+  box-shadow: 0 6px 16px -6px rgba(99, 102, 241, 0.9);
+}
+.brand-name {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  background: linear-gradient(120deg, #fff, #c7d2fe);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.deck-brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.brand-mark-sm { border-radius: 6px; flex-shrink: 0; }
+
 .hero { width: 220px; height: 220px; margin-bottom: 4px; }
 .hero-svg { width: 100%; height: 100%; overflow: visible; }
 
