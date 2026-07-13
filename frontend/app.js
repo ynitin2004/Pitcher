@@ -105,10 +105,10 @@
   }
   window.goToSlide = (oneBased) => goTo(oneBased - 1); // backend slide events
 
-  function loadDeck(title, deckSlides) {
+  function loadDeck(title, deckSlides, language) {
     slides = deckSlides;
     index = 0;
-    currentDeck = { title, slides: deckSlides };
+    currentDeck = { title, slides: deckSlides, language: language || "" };
     deckTitle.textContent = title;
     renderDots();
     render();
@@ -144,7 +144,10 @@
       reconnectDelay = 1000;
       // Survive the Realtime session limit / drops: re-apply our deck.
       if (currentDeck) {
-        ws.send(JSON.stringify({ type: "use_deck", title: currentDeck.title, slides: currentDeck.slides }));
+        ws.send(JSON.stringify({
+          type: "use_deck", title: currentDeck.title,
+          slides: currentDeck.slides, language: currentDeck.language,
+        }));
       }
     });
 
@@ -171,7 +174,7 @@
         break;
       case "deck":
         setGenerating(false);
-        loadDeck(data.title, data.slides);
+        loadDeck(data.title, data.slides, data.language);
         break;
       case "generation_error":
         setGenerating(false);

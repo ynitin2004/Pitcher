@@ -104,6 +104,7 @@ FALLBACK_DECK = {
             "note": "Sorry — let's try a different topic.",
         }
     ],
+    "language": "English",
 }
 
 
@@ -119,9 +120,11 @@ GEN_PROMPT = (
     "You are a slide-deck generator. Create a concise, accurate {n}-slide presentation "
     "on the topic: \"{topic}\".\n\n"
     "Return ONLY valid JSON (no markdown, no code fences, no commentary) with EXACTLY this shape:\n"
-    '{{"title": "<deck title>", "slides": [{{"title": "<slide title>", '
+    '{{"language": "<language you wrote in, e.g. English or Hindi>", "title": "<deck title>", '
+    '"slides": [{{"title": "<slide title>", '
     '"bullets": ["<point>", "<point>", "<point>"], "note": "<one spoken sentence>"}}]}}\n\n'
-    "Rules: exactly {n} slides; write everything in the SAME language as the topic; each slide has a short title, 2-4 concise bullets, and a one-sentence "
+    "Rules: exactly {n} slides; write everything in the SAME language as the topic and set \"language\" to "
+    "that language's English name; each slide has a short title, 2-4 concise bullets, and a one-sentence "
     "spoken 'note' the presenter would say. If the topic is unsafe, hateful, or inappropriate, instead "
     'return a single-slide deck politely declining (title "Can\'t present this").'
 )
@@ -178,6 +181,44 @@ def _parse_deck(raw: str):
     return data
 
 
+# Detect a deck's language from its text by Unicode script (covers non-Latin
+# scripts reliably; Latin-script text falls back to the default language).
+_SCRIPT_RANGES = [
+    ("Hindi", 0x0900, 0x097F),
+    ("Bengali", 0x0980, 0x09FF),
+    ("Tamil", 0x0B80, 0x0BFF),
+    ("Telugu", 0x0C00, 0x0C7F),
+    ("Arabic", 0x0600, 0x06FF),
+    ("Hebrew", 0x0590, 0x05FF),
+    ("Russian", 0x0400, 0x04FF),
+    ("Greek", 0x0370, 0x03FF),
+    ("Thai", 0x0E00, 0x0E7F),
+    ("Japanese", 0x3040, 0x30FF),
+    ("Korean", 0xAC00, 0xD7AF),
+    ("Chinese", 0x4E00, 0x9FFF),
+]
+
+
+def detect_language(text: str) -> str:
+    for ch in text:
+        cp = ord(ch)
+        for name, lo, hi in _SCRIPT_RANGES:
+            if lo <= cp <= hi:
+                return name
+    return DEFAULT_LANGUAGE
+
+
+def _deck_language(deck: dict, slides: list) -> str:
+    """Prefer an explicit 'language', else detect from the slide text."""
+    stated = str(deck.get("language", "")).strip()
+    if stated:
+        return stated
+    sample = " ".join(
+        f"{s.get('title', '')} {' '.join(s.get('bullets', []))}" for s in slides
+    )
+    return detect_language(sample)
+
+
 def _normalize(deck: dict) -> dict:
     clean = []
     for s in deck.get("slides", [])[:MAX_SLIDES]:
@@ -191,7 +232,11 @@ def _normalize(deck: dict) -> dict:
         clean.append({"title": title, "bullets": bullets, "note": note})
     if not clean:
         return dict(FALLBACK_DECK)
-    return {"title": (str(deck.get("title", "")).strip() or "Presentation"), "slides": clean}
+    return {
+        "title": (str(deck.get("title", "")).strip() or "Presentation"),
+        "slides": clean,
+        "language": _deck_language(deck, clean),
+    }
 
 
 def _normalize_uploaded(deck: dict, max_slides: int = 12) -> dict:
@@ -209,7 +254,11 @@ def _normalize_uploaded(deck: dict, max_slides: int = 12) -> dict:
         clean.append({"title": title[:140], "bullets": bullets, "note": note[:300]})
     if not clean:
         return dict(FALLBACK_DECK)
-    return {"title": (str(deck.get("title", "")).strip() or "Presentation"), "slides": clean}
+    return {
+        "title": (str(deck.get("title", "")).strip() or "Presentation"),
+        "slides": clean,
+        "language": _deck_language(deck, clean),
+    }
 
 
 async def generate_deck(topic: str) -> dict:
@@ -228,6 +277,7 @@ async def generate_deck(topic: str) -> dict:
 
 
 def build_instructions(deck: dict) -> str:
+    lang = deck.get("language") or DEFAULT_LANGUAGE
     lines = []
     for i, s in enumerate(deck["slides"], 1):
         note = f" ({s['note']})" if s["note"] else ""
@@ -236,7 +286,9 @@ def build_instructions(deck: dict) -> str:
         f"You are an AI presenter for a {len(deck['slides'])}-slide deck titled "
         f"\"{deck['title']}\".\n\nHere is the full deck:\n\n" + "\n".join(lines) + "\n\n"
         "Rules:\n"
-        f"- Reply in the SAME language the user speaks or types in. If you truly can't tell, use {DEFAULT_LANGUAGE}.\n"
+        f"- This deck's language is {lang}. When PRESENTING/narrating slides, ALWAYS use {lang} and "
+        f"NEVER switch languages between slides.\n"
+        f"- When the USER asks a question, reply in the same language the user used (default {lang}).\n"
         "- Answer ONLY using the slides above. If the answer is not in the deck, say you don't have that "
         "detail — never invent facts, numbers, or names.\n"
         "- If asked something unrelated to this deck, briefly say it's outside this presentation.\n"
@@ -319,6 +371,7 @@ async def ws_endpoint(browser: WebSocket):
         "slide": 1,
         "total": MAX_SLIDES,
         "ready": False,
+        "lang": DEFAULT_LANGUAGE,   # the deck's pinned narration language
         "response_active": False,   # is a model response currently generating?
         "present_active": False,    # is Present Mode running?
         "present_index": 1,         # slide currently being narrated
@@ -360,9 +413,9 @@ async def ws_endpoint(browser: WebSocket):
         await to_azure({
             "type": "conversation.item.create",
             "item": {"type": "message", "role": "user", "content": [{"type": "input_text",
-                     "text": f"Present slide {i} of the deck now. Give 2-4 short, engaging spoken "
-                             "sentences in the SAME language as the deck about it. Do not call any tools "
-                             "and do not say the slide number."}]},
+                     "text": f"Present slide {i} of the deck now, speaking ONLY in {state['lang']} "
+                             "(do not switch languages). Give 2-4 short, engaging spoken sentences about "
+                             "it. Do not call any tools and do not say the slide number."}]},
         })
         await to_azure({"type": "response.create"})
         print(f"[present] narrating slide {i}/{state['total']}")
@@ -372,13 +425,17 @@ async def ws_endpoint(browser: WebSocket):
         OR a reconnect) and hand it to the browser to render."""
         state["total"] = len(deck["slides"])
         state["slide"] = 1
+        state["lang"] = deck.get("language") or DEFAULT_LANGUAGE
         state["present_active"] = False
         state["present_paused"] = False
         await to_azure({"type": "session.update", "session": make_session(deck)})
         state["ready"] = True
-        await browser.send_json({"type": "deck", "title": deck["title"], "slides": deck["slides"]})
+        await browser.send_json({
+            "type": "deck", "title": deck["title"],
+            "slides": deck["slides"], "language": state["lang"],
+        })
         await browser.send_json({"type": "status", "msg": "ready — ask a question or click Present"})
-        print(f"[{source}] deck ready: {deck['title']!r} ({state['total']} slides)")
+        print(f"[{source}] deck ready: {deck['title']!r} ({state['total']} slides, lang={state['lang']})")
 
     async def browser_pump():
         while True:
@@ -401,7 +458,11 @@ async def ws_endpoint(browser: WebSocket):
                 if not slides:
                     await browser.send_json({"type": "generation_error", "msg": "That deck had no slides."})
                     continue
-                deck = _normalize_uploaded({"title": data.get("title", "Presentation"), "slides": slides})
+                deck = _normalize_uploaded({
+                    "title": data.get("title", "Presentation"),
+                    "slides": slides,
+                    "language": data.get("language", ""),
+                })
                 await apply_deck(deck, "use_deck")
 
             elif kind == "user_text":

@@ -85,3 +85,27 @@ Reversing the over-correction (forced English) and hardening the model + errors.
 
 **Done when:** the app replies in the user's language, stays grounded to the deck, and surfaces friendly
 errors without crashing — all verified locally.
+
+---
+
+# Corrections — Phase 3
+
+## C8–C11 — Present Mode switched language between slides 🌐 ✅
+**Bug:** slide 1 narrated in English, slide 2 (and on) drifted to another language.
+**Root cause:** each slide was a separate `response.create` told to use *"the same language as the deck"* —
+the model had to **re-infer** the language every slide, and inference is non-deterministic → drift.
+
+**Fix — decide the language once, then command it explicitly:**
+- [x] C8 The **generator returns a `language`** field; uploaded decks are **script-detected**
+      (`detect_language()` — Devanagari→Hindi, Arabic, CJK, Cyrillic, …); fallback = `DEFAULT_LANGUAGE`.
+- [x] C9 The language is stored as `state["lang"]` and named **explicitly** in the instructions
+      (*"narrate every slide in {lang}; never switch languages between slides"*) and in **every narration
+      prompt** (*"speaking ONLY in {lang}"*) — a fixed anchor, not a re-inference. Q&A still matches the user.
+- [x] C10 `language` is carried through the `deck` message → browser cache → `use_deck`, so a **reconnect
+      keeps the same language**.
+- [x] C11 **Verified:** English deck → all 6 slides Latin/English; Hindi deck → all 6 slides Hindi. No drift.
+
+**Also:** if the mic is on without headphones, the AI's own audio can be re-transcribed and nudge the
+language — the **"Mute mic while the AI speaks"** toggle avoids that during Present Mode.
+
+**Done when:** a presentation stays in one language for the whole deck. ✅
