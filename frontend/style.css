@@ -374,8 +374,33 @@ button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
   font-style: italic;
 }
 
-@media (max-width: 560px) {
-  .slide { padding: 30px 24px; min-height: 320px; }
-  h1 { font-size: 1.6rem; }
-  li { font-size: 1rem; }
+@media (max-width: 640px) {
+  body { padding: 14px; align-items: flex-start; }
+  .stage, .topic-screen { width: 100%; gap: 16px; }
+
+  /* Slide card */
+  .slide { padding: 26px 20px; min-height: 260px; }
+  h1 { font-size: 1.5rem; margin-bottom: 20px; }
+  li { font-size: 0.98rem; padding-left: 26px; }
+
+  /* Deck header: title on one line, controls wrap below */
+  .deck-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .present-controls { flex-wrap: wrap; justify-content: flex-start; }
+
+  /* Ask bar: input full width on its own row, buttons below */
+  .ask { flex-wrap: wrap; }
+  .ask input { flex: 1 1 100%; order: -1; }
+  .mic, #ask-send { flex: 1 1 auto; }
+
+  /* Topic screen: stack input + button, shrink hero + headings */
+  .hero { width: 168px; height: 168px; }
+  .topic-title { font-size: 1.6rem; }
+  .topic-sub { font-size: 0.95rem; }
+  .topic-form { flex-direction: column; }
+  .topic-form input { min-width: 0; width: 100%; }
+  .topic-form button { width: 100%; }
+  .upload-btn { width: 100%; justify-content: center; }
+
+  .answer { padding: 14px 16px; }
+  .counter { min-width: 40px; }
 }

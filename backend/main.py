@@ -47,6 +47,11 @@ DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-realtime").strip()
 API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-04-01-preview").strip()
 VOICE = os.getenv("REALTIME_VOICE", "alloy").strip()
 
+# Force a single language so the model never drifts to another one (e.g. when
+# Whisper mis-detects accented English). Override via env if you want another.
+LANG_NAME = os.getenv("PRESENTER_LANGUAGE", "English").strip()
+LANG_CODE = os.getenv("PRESENTER_LANGUAGE_CODE", "en").strip()
+
 MAX_SLIDES = 6
 
 TOOLS = [
@@ -105,7 +110,7 @@ GEN_PROMPT = (
     "Return ONLY valid JSON (no markdown, no code fences, no commentary) with EXACTLY this shape:\n"
     '{{"title": "<deck title>", "slides": [{{"title": "<slide title>", '
     '"bullets": ["<point>", "<point>", "<point>"], "note": "<one spoken sentence>"}}]}}\n\n'
-    "Rules: exactly {n} slides; each slide has a short title, 2-4 concise bullets, and a one-sentence "
+    "Rules: exactly {n} slides; write everything in {lang}; each slide has a short title, 2-4 concise bullets, and a one-sentence "
     "spoken 'note' the presenter would say. If the topic is unsafe, hateful, or inappropriate, instead "
     'return a single-slide deck politely declining (title "Can\'t present this").'
 )
@@ -113,7 +118,7 @@ GEN_PROMPT = (
 
 async def _ask_model_for_deck(topic: str, strict: bool = False) -> str:
     """Open a short-lived TEXT-only Azure connection and return the raw deck text."""
-    prompt = GEN_PROMPT.format(topic=topic, n=MAX_SLIDES)
+    prompt = GEN_PROMPT.format(topic=topic, n=MAX_SLIDES, lang=LANG_NAME)
     if strict:
         prompt += "\n\nIMPORTANT: Output ONLY raw JSON. Start with '{' and end with '}'. No code fences."
 
@@ -220,6 +225,7 @@ def build_instructions(deck: dict) -> str:
         f"You are an AI presenter for a {len(deck['slides'])}-slide deck titled "
         f"\"{deck['title']}\".\n\nHere is the full deck:\n\n" + "\n".join(lines) + "\n\n"
         "Rules:\n"
+        f"- ALWAYS speak and reply in {LANG_NAME}, no matter what language the question is in.\n"
         "- When the user asks about a topic, FIRST call `go_to_slide` with the best-matching slide "
         "number, THEN answer in 1-3 short, spoken-style sentences.\n"
         "- Use `next_slide` / `previous_slide` when the user says 'next' or 'go back'.\n"
@@ -242,7 +248,7 @@ def make_session(deck: dict) -> dict:
             "create_response": True,
             "interrupt_response": True,
         },
-        "input_audio_transcription": {"model": "whisper-1"},
+        "input_audio_transcription": {"model": "whisper-1", "language": LANG_CODE},
         "instructions": build_instructions(deck),
         "tools": TOOLS,
         "tool_choice": "auto",
@@ -320,7 +326,8 @@ async def ws_endpoint(browser: WebSocket):
             "type": "conversation.item.create",
             "item": {"type": "message", "role": "user", "content": [{"type": "input_text",
                      "text": f"Present slide {i} of the deck now. Give 2-4 short, engaging spoken "
-                             "sentences about it. Do not call any tools and do not say the slide number."}]},
+                             f"sentences in {LANG_NAME} about it. Do not call any tools and do not say "
+                             "the slide number."}]},
         })
         await to_azure({"type": "response.create"})
         print(f"[present] narrating slide {i}/{state['total']}")
