@@ -20,7 +20,16 @@ import asyncio
 import json
 import os
 import re
+import sys
 from pathlib import Path
+
+# Log in UTF-8 so non-ASCII topics/transcripts (any language) never crash a
+# print() — the Windows console defaults to cp1252.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 import uvicorn
 import websockets
@@ -47,10 +56,12 @@ DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-realtime").strip()
 API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-04-01-preview").strip()
 VOICE = os.getenv("REALTIME_VOICE", "alloy").strip()
 
-# Force a single language so the model never drifts to another one (e.g. when
-# Whisper mis-detects accented English). Override via env if you want another.
-LANG_NAME = os.getenv("PRESENTER_LANGUAGE", "English").strip()
-LANG_CODE = os.getenv("PRESENTER_LANGUAGE_CODE", "en").strip()
+# The app matches the user's language (STT auto-detects; the model replies in
+# the same language). This is only the FALLBACK when the language is unclear.
+DEFAULT_LANGUAGE = os.getenv("PRESENTER_LANGUAGE", "English").strip()
+
+# Lower temperature = more deterministic, less drift/hallucination (Realtime min ~0.6).
+TEMPERATURE = float(os.getenv("REALTIME_TEMPERATURE", "0.6"))
 
 MAX_SLIDES = 6
 
@@ -110,7 +121,7 @@ GEN_PROMPT = (
     "Return ONLY valid JSON (no markdown, no code fences, no commentary) with EXACTLY this shape:\n"
     '{{"title": "<deck title>", "slides": [{{"title": "<slide title>", '
     '"bullets": ["<point>", "<point>", "<point>"], "note": "<one spoken sentence>"}}]}}\n\n'
-    "Rules: exactly {n} slides; write everything in {lang}; each slide has a short title, 2-4 concise bullets, and a one-sentence "
+    "Rules: exactly {n} slides; write everything in the SAME language as the topic; each slide has a short title, 2-4 concise bullets, and a one-sentence "
     "spoken 'note' the presenter would say. If the topic is unsafe, hateful, or inappropriate, instead "
     'return a single-slide deck politely declining (title "Can\'t present this").'
 )
@@ -118,7 +129,7 @@ GEN_PROMPT = (
 
 async def _ask_model_for_deck(topic: str, strict: bool = False) -> str:
     """Open a short-lived TEXT-only Azure connection and return the raw deck text."""
-    prompt = GEN_PROMPT.format(topic=topic, n=MAX_SLIDES, lang=LANG_NAME)
+    prompt = GEN_PROMPT.format(topic=topic, n=MAX_SLIDES)
     if strict:
         prompt += "\n\nIMPORTANT: Output ONLY raw JSON. Start with '{' and end with '}'. No code fences."
 
@@ -225,11 +236,14 @@ def build_instructions(deck: dict) -> str:
         f"You are an AI presenter for a {len(deck['slides'])}-slide deck titled "
         f"\"{deck['title']}\".\n\nHere is the full deck:\n\n" + "\n".join(lines) + "\n\n"
         "Rules:\n"
-        f"- ALWAYS speak and reply in {LANG_NAME}, no matter what language the question is in.\n"
+        f"- Reply in the SAME language the user speaks or types in. If you truly can't tell, use {DEFAULT_LANGUAGE}.\n"
+        "- Answer ONLY using the slides above. If the answer is not in the deck, say you don't have that "
+        "detail — never invent facts, numbers, or names.\n"
+        "- If asked something unrelated to this deck, briefly say it's outside this presentation.\n"
         "- When the user asks about a topic, FIRST call `go_to_slide` with the best-matching slide "
         "number, THEN answer in 1-3 short, spoken-style sentences.\n"
         "- Use `next_slide` / `previous_slide` when the user says 'next' or 'go back'.\n"
-        "- Stay on this deck's topic. Keep answers concise."
+        "- Keep answers concise."
     )
 
 
@@ -248,7 +262,9 @@ def make_session(deck: dict) -> dict:
             "create_response": True,
             "interrupt_response": True,
         },
-        "input_audio_transcription": {"model": "whisper-1", "language": LANG_CODE},
+        # No fixed language -> Whisper detects it, so voice works in any language.
+        "input_audio_transcription": {"model": "whisper-1"},
+        "temperature": TEMPERATURE,
         "instructions": build_instructions(deck),
         "tools": TOOLS,
         "tool_choice": "auto",
@@ -258,10 +274,29 @@ def make_session(deck: dict) -> dict:
     }
 
 
+def friendly_error(err: dict):
+    """Map an Azure error event to a (user-facing message, level) pair.
+    level: 'retry' (transient), 'reconnect', or 'info'."""
+    text = f"{err.get('code') or err.get('type') or ''} {err.get('message', '')}".lower()
+    if any(k in text for k in ("rate", "429", "quota", "throttl")):
+        return ("The AI service is busy right now — please try again in a moment.", "retry")
+    if "content" in text and "filter" in text or "safety" in text:
+        return ("I can't respond to that one — try a different question.", "info")
+    if any(k in text for k in ("context_length", "too long", "maximum context", "token")):
+        return ("That got too long — try a shorter question.", "info")
+    if "session" in text and any(k in text for k in ("expired", "timeout", "duration", "closed")):
+        return ("Session expired — reconnecting…", "reconnect")
+    if any(k in text for k in ("auth", "api key", "401", "403", "unauthorized")):
+        return ("There's an authentication problem with the AI service.", "info")
+    return (err.get("message") or "Something went wrong — please try again.", "info")
+
+
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 app = FastAPI(title="ML Voice Agent")
+
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB cap for .pptx uploads
 
 
 @app.websocket("/ws")
@@ -326,8 +361,8 @@ async def ws_endpoint(browser: WebSocket):
             "type": "conversation.item.create",
             "item": {"type": "message", "role": "user", "content": [{"type": "input_text",
                      "text": f"Present slide {i} of the deck now. Give 2-4 short, engaging spoken "
-                             f"sentences in {LANG_NAME} about it. Do not call any tools and do not say "
-                             "the slide number."}]},
+                             "sentences in the SAME language as the deck about it. Do not call any tools "
+                             "and do not say the slide number."}]},
         })
         await to_azure({"type": "response.create"})
         print(f"[present] narrating slide {i}/{state['total']}")
@@ -462,6 +497,10 @@ async def ws_endpoint(browser: WebSocket):
 
             elif t == "conversation.item.input_audio_transcription.failed":
                 print(f"[azure] transcription FAILED: {event.get('error', event)}")
+                await browser.send_json({
+                    "type": "error", "level": "info",
+                    "msg": "Didn't catch that — please try again.",
+                })
 
             elif t == "response.audio.delta":
                 await browser.send_json({"type": "audio_delta", "audio": event.get("delta", "")})
@@ -493,9 +532,16 @@ async def ws_endpoint(browser: WebSocket):
                     await browser.send_json({"type": "answer_done"})
 
             elif t == "error":
-                err = event.get("error", event)
-                print(f"[azure error] {err}")
-                await browser.send_json({"type": "status", "msg": f"error: {err.get('message', err)}"})
+                err = event.get("error", event) or {}
+                msg, level = friendly_error(err)
+                print(f"[azure error] code={err.get('code')} type={err.get('type')} -> {msg!r}")
+                # Recover: clear in-flight state so the app isn't stuck.
+                state["response_active"] = False
+                pending.clear()
+                if state["present_active"]:
+                    state["present_active"] = False
+                    await browser.send_json({"type": "present_done"})
+                await browser.send_json({"type": "error", "level": level, "msg": msg})
 
     try:
         await asyncio.gather(browser_pump(), azure_pump())
@@ -514,6 +560,8 @@ async def upload(file: UploadFile = File(...)):
     if not (file.filename or "").lower().endswith(".pptx"):
         return JSONResponse({"error": "Please upload a .pptx file."}, status_code=400)
     data = await file.read()
+    if len(data) > MAX_UPLOAD_BYTES:
+        return JSONResponse({"error": "That file is too large (max 20 MB)."}, status_code=400)
     try:
         deck = extract_deck(data)
     except Exception as e:

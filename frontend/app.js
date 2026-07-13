@@ -38,6 +38,15 @@
   const micBtn = document.getElementById("mic-btn");
   const heard = document.getElementById("heard");
   const muteChk = document.getElementById("mute-mic");
+  const deckMsg = document.getElementById("deck-msg");
+
+  let deckMsgTimer = null;
+  function showDeckMsg(text) {
+    deckMsg.textContent = text;
+    deckMsg.hidden = false;
+    if (deckMsgTimer) clearTimeout(deckMsgTimer);
+    deckMsgTimer = setTimeout(() => { deckMsg.hidden = true; }, 6000);
+  }
 
   // ---- Deck state ----
   let slides = [];
@@ -213,6 +222,13 @@
       case "user_transcript":
         heard.hidden = false;
         heard.textContent = "You said: " + data.text;
+        break;
+      case "error":
+        aiSpeaking = false;
+        setGenerating(false);
+        input.disabled = false;
+        if (!topicScreen.hidden) topicMsg.textContent = "⚠ " + data.msg;
+        else showDeckMsg("⚠ " + data.msg);
         break;
     }
   }

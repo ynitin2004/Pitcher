@@ -51,3 +51,37 @@ and text stays readable.
 - [x] C3.4 Commit + push → Render auto-redeploys; hard-refresh and re-check.
 
 **Done when:** the Render URL answers in English and looks right on a phone.
+
+---
+
+# Corrections — Phase 2
+
+Reversing the over-correction (forced English) and hardening the model + errors.
+
+## C4 — Match the user's language (multilingual) ✅
+- [x] C4.1 Removed forced English; Whisper **auto-detects** the language again.
+- [x] C4.2 Answers: *"Reply in the SAME language the user speaks/types."* (fallback = `PRESENTER_LANGUAGE`).
+- [x] C4.3 Generation: *"write everything in the same language as the topic."*
+- [x] C4.4 Present Mode narrates in the deck's language.
+- **✅ Verified:** Hindi topic → Hindi deck + Hindi answer; English topic → English.
+
+## C5 — Reduce hallucination ✅
+- [x] C5.1 **Grounding rule:** answer only from the slides; if it's not there, say so — never invent.
+- [x] C5.2 **Out-of-scope rule:** unrelated questions get a brief "that's outside this deck."
+- [x] C5.3 **Lower `temperature` = 0.6** (env `REALTIME_TEMPERATURE`) for less drift.
+- **✅ Verified:** "Tesla stock price?" on a Photosynthesis deck → politely refused.
+
+## C6 — Structured error handling ✅
+- [x] C6.1 `friendly_error()` classifies Azure error codes → clear messages + a level
+      (rate-limit → "busy, try again"; content-filter → "can't answer that"; auth; token/length; session).
+- [x] C6.2 On error, backend **recovers** (clears in-flight state, stops a hung Present) instead of stalling.
+- [x] C6.3 Whisper transcription failure → "Didn't catch that — please try again."
+- [x] C6.4 Upload **size limit** (20 MB) + friendlier messages.
+- [x] C6.5 Frontend shows errors in a red toast (`#deck-msg`) / topic message, and re-enables input.
+
+## C7 — Robustness bug found while testing ✅
+- [x] C7.1 **UTF-8 logging:** a non-ASCII topic (e.g. Hindi) crashed `print()` on the Windows cp1252
+      console and killed the WebSocket handler. Fixed by forcing `sys.stdout` to UTF-8 at startup.
+
+**Done when:** the app replies in the user's language, stays grounded to the deck, and surfaces friendly
+errors without crashing — all verified locally.

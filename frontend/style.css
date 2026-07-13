@@ -314,6 +314,16 @@ button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
 }
 .conn.live { color: var(--accent2); }
 
+.deck-msg {
+  text-align: center;
+  font-size: 0.9rem;
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 10px;
+  padding: 9px 14px;
+}
+
 /* Phase 5: answer panel + ask box */
 .answer {
   background: rgba(34, 211, 238, 0.06);
