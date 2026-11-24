@@ -1,7 +1,7 @@
 """
 ML Voice Agent — backend relay (Phases 4–9).
 
-The backend is a RELAY between the browser and Azure gpt-realtime:
+The backend is a RELAY between the browser and OpenAI gpt-realtime (or Azure OpenAI):
 
     Browser ──generate(topic)─► server ──(text)──► Azure     -> returns a slide deck (JSON)
     Browser ──user_text/audio─► server ──────────► Azure     -> answer + tool calls
@@ -50,18 +50,20 @@ ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = ROOT / "frontend"
 load_dotenv(ROOT / ".env")
 
+# Provider: if AZURE_OPENAI_ENDPOINT is set we talk to Azure OpenAI; otherwise we
+# talk to OpenAI directly (api.openai.com). The key may be in OPENAI_API_KEY or,
+# for backwards compatibility, AZURE_OPENAI_API_KEY.
 ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip()
-API_KEY = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
-DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-realtime").strip()
-API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-04-01-preview").strip()
+USE_AZURE = bool(ENDPOINT)
+API_KEY = (os.getenv("OPENAI_API_KEY") or os.getenv("AZURE_OPENAI_API_KEY") or "").strip()
+DEPLOYMENT = (
+    os.getenv("REALTIME_MODEL") or os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME") or "gpt-realtime"
+).strip()
 VOICE = os.getenv("REALTIME_VOICE", "alloy").strip()
 
 # The app matches the user's language (STT auto-detects; the model replies in
 # the same language). This is only the FALLBACK when the language is unclear.
 DEFAULT_LANGUAGE = os.getenv("PRESENTER_LANGUAGE", "English").strip()
-
-# Lower temperature = more deterministic, less drift/hallucination (Realtime min ~0.6).
-TEMPERATURE = float(os.getenv("REALTIME_TEMPERATURE", "0.6"))
 
 MAX_SLIDES = 6
 
@@ -108,9 +110,22 @@ FALLBACK_DECK = {
 }
 
 
-def azure_url() -> str:
-    host = ENDPOINT.replace("https://", "").replace("http://", "").rstrip("/")
-    return f"wss://{host}/openai/realtime?api-version={API_VERSION}&deployment={DEPLOYMENT}"
+def realtime_url() -> str:
+    if USE_AZURE:
+        host = ENDPOINT.replace("https://", "").replace("http://", "").rstrip("/")
+        # Azure's GA (v1) Realtime endpoint — same protocol as OpenAI's.
+        return f"wss://{host}/openai/v1/realtime?model={DEPLOYMENT}"
+    return f"wss://api.openai.com/v1/realtime?model={DEPLOYMENT}"
+
+
+def realtime_headers() -> dict:
+    if USE_AZURE:
+        return {"api-key": API_KEY}
+    return {"Authorization": f"Bearer {API_KEY}"}
+
+
+def connect_realtime():
+    return websockets.connect(realtime_url(), additional_headers=realtime_headers(), max_size=None)
 
 
 # ---------------------------------------------------------------------------
@@ -136,11 +151,10 @@ async def _ask_model_for_deck(topic: str, strict: bool = False) -> str:
     if strict:
         prompt += "\n\nIMPORTANT: Output ONLY raw JSON. Start with '{' and end with '}'. No code fences."
 
-    async with websockets.connect(
-        azure_url(), additional_headers={"api-key": API_KEY}, max_size=None
-    ) as ws:
+    async with connect_realtime() as ws:
         await ws.recv()  # session.created
-        await ws.send(json.dumps({"type": "session.update", "session": {"modalities": ["text"]}}))
+        await ws.send(json.dumps({"type": "session.update",
+                                  "session": {"type": "realtime", "output_modalities": ["text"]}}))
         await ws.send(json.dumps({
             "type": "conversation.item.create",
             "item": {"type": "message", "role": "user",
@@ -301,28 +315,34 @@ def build_instructions(deck: dict) -> str:
 
 def make_session(deck: dict) -> dict:
     """The audio presentation session config, built from a generated deck."""
+    # GA Realtime session shape. "audio" output also streams its transcript,
+    # which the UI shows as the on-screen answer text.
+    pcm16 = {"type": "audio/pcm", "rate": 24000}
     return {
-        "modalities": ["audio", "text"],
-        "voice": VOICE,
-        "output_audio_format": "pcm16",
-        "input_audio_format": "pcm16",
-        "turn_detection": {
-            "type": "server_vad",
-            "threshold": 0.5,
-            "prefix_padding_ms": 300,
-            "silence_duration_ms": 500,
-            "create_response": True,
-            "interrupt_response": True,
+        "type": "realtime",
+        "output_modalities": ["audio"],
+        "audio": {
+            "input": {
+                "format": pcm16,
+                # No fixed language -> Whisper detects it, so voice works in any language.
+                "transcription": {"model": "whisper-1"},
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": 0.5,
+                    "prefix_padding_ms": 300,
+                    "silence_duration_ms": 500,
+                    "create_response": True,
+                    "interrupt_response": True,
+                },
+            },
+            "output": {"format": pcm16, "voice": VOICE},
         },
-        # No fixed language -> Whisper detects it, so voice works in any language.
-        "input_audio_transcription": {"model": "whisper-1"},
-        "temperature": TEMPERATURE,
         "instructions": build_instructions(deck),
         "tools": TOOLS,
         "tool_choice": "auto",
         # Token/cost control: cap every spoken response so answers + narration
         # stay short (audio output tokens are the expensive part).
-        "max_response_output_tokens": 400,
+        "max_output_tokens": 400,
     }
 
 
@@ -357,14 +377,25 @@ async def ws_endpoint(browser: WebSocket):
     print("[browser] connected")
 
     try:
-        azure = await websockets.connect(
-            azure_url(), additional_headers={"api-key": API_KEY}, max_size=None
-        )
+        azure = await connect_realtime()
         first = json.loads(await azure.recv())
         print(f"[azure] {first.get('type')}")
+        if first.get("type") == "error":  # e.g. invalid/expired key: OpenAI accepts, then errors
+            err = first.get("error") or {}
+            await azure.close()
+            raise RuntimeError(f"{err.get('code')} {err.get('message')}")
     except Exception as e:
         print(f"[azure] connection failed: {type(e).__name__}: {e}")
-        await browser.send_json({"type": "status", "msg": f"Azure FAILED: {type(e).__name__}"})
+        detail = str(e).lower()
+        if not API_KEY:
+            msg = "Server is missing its OpenAI API key (set OPENAI_API_KEY)."
+        elif any(k in detail for k in ("401", "403", "api_key", "api key", "unauthorized")):
+            msg = "The AI service rejected the API key (invalid or expired)."
+        else:
+            msg = f"Can't reach the AI service ({type(e).__name__}). Please try again shortly."
+        await browser.send_json({"type": "status", "msg": "AI connection failed"})
+        await browser.send_json({"type": "error", "level": "info", "msg": msg})
+        await browser.close()
         return
 
     state = {
@@ -563,10 +594,11 @@ async def ws_endpoint(browser: WebSocket):
                     "msg": "Didn't catch that — please try again.",
                 })
 
-            elif t == "response.audio.delta":
+            elif t in ("response.output_audio.delta", "response.audio.delta"):
                 await browser.send_json({"type": "audio_delta", "audio": event.get("delta", "")})
 
-            elif t in ("response.audio_transcript.delta", "response.text.delta", "response.output_text.delta"):
+            elif t in ("response.output_audio_transcript.delta", "response.output_text.delta",
+                       "response.audio_transcript.delta", "response.text.delta"):
                 await browser.send_json({"type": "answer_delta", "delta": event.get("delta", "")})
 
             elif t == "response.function_call_arguments.done":

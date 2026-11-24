@@ -5,7 +5,7 @@ An AI voice application that **presents slides and answers questions by voice**.
 can **auto-present** the whole deck out loud, **change slides automatically** from your questions,
 and be **interrupted** mid-sentence.
 
-Built on **Azure OpenAI `gpt-realtime`** — one Realtime (speech-to-speech) model that listens,
+Built on **OpenAI `gpt-realtime`** (GA Realtime API; Azure OpenAI also supported) — one Realtime (speech-to-speech) model that listens,
 reasons, calls tools (to drive the slides), and speaks, with native interruption.
 
 ## Features
@@ -24,9 +24,9 @@ Browser (mic + slides + audio)
    │  WebSocket /ws  (JSON: generate / use_deck / user_text / audio_in / present_*)
    ▼
 FastAPI relay (backend/main.py)
-   │  WebSocket  (Azure Realtime protocol)
+   │  WebSocket  (OpenAI Realtime GA protocol)
    ▼
-Azure OpenAI gpt-realtime  — STT + reasoning + tool calls + TTS + VAD/interruption
+OpenAI gpt-realtime  — STT + reasoning + tool calls + TTS + VAD/interruption
 ```
 - **Auto slide change** = the model calls the `go_to_slide` / `next_slide` / `previous_slide` tools.
 - **Interruption** = the Realtime API's server-side VAD (`interrupt_response`) + the browser flushing
@@ -36,7 +36,7 @@ Azure OpenAI gpt-realtime  — STT + reasoning + tool calls + TTS + VAD/interrup
 
 ## Run locally
 
-Requires **Python 3.11+** and an **Azure OpenAI** resource with a **`gpt-realtime`** deployment.
+Requires **Python 3.11+** and an **OpenAI API key** (platform.openai.com) with access to **`gpt-realtime`**.
 
 ```powershell
 # 1. Virtual environment
@@ -48,7 +48,7 @@ pip install -r requirements.txt
 
 # 3. Secrets — copy the template and paste your key
 copy .env.example .env              # (macOS/Linux: cp .env.example .env)
-#    then edit .env and set AZURE_OPENAI_API_KEY
+#    then edit .env and set OPENAI_API_KEY
 
 # 4. Start
 python -u backend\main.py
@@ -59,12 +59,14 @@ Open **http://127.0.0.1:8000**, enter a topic (or upload a `.pptx`), and start a
 ### `.env`
 
 ```
-AZURE_OPENAI_ENDPOINT=https://<your-resource>.openai.azure.com
-AZURE_OPENAI_API_KEY=<your key>
-AZURE_OPENAI_DEPLOYMENT_NAME=gpt-realtime
-AZURE_OPENAI_API_VERSION=2025-04-01-preview
-REALTIME_VOICE=alloy               # optional: alloy | echo | shimmer | verse
+OPENAI_API_KEY=<your key>
+REALTIME_MODEL=gpt-realtime
+REALTIME_VOICE=alloy               # optional: alloy | echo | shimmer | verse | marin | cedar
 ```
+
+To use **Azure OpenAI** instead, also set `AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com`
+(the app then connects to Azure's GA `/openai/v1/realtime` endpoint and `REALTIME_MODEL` is your
+deployment name). Leave it unset for OpenAI.
 
 ## Using it
 
@@ -119,7 +121,7 @@ ml-voice-agent/
 Also: set your **`.env` values as the host's environment variables** (never commit `.env`), and let the
 host set `PORT` (the app already reads `HOST`/`PORT`).
 
-### Option A — Azure Container Apps  *(recommended: same cloud as your model = low latency)*
+### Option A — Azure Container Apps  *(lowest latency if you use Azure OpenAI)*
 1. `az login`
 2. Build & push the image (or let ACA build from source):
    ```bash
@@ -128,8 +130,8 @@ host set `PORT` (the app already reads `HOST`/`PORT`).
      --location eastus2 --source . --ingress external --target-port 8000
    ```
 3. In the Container App → **Settings → Secrets/Environment variables**, add
-   `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT_NAME`,
-   `AZURE_OPENAI_API_VERSION`, and set `HOST=0.0.0.0`.
+   `OPENAI_API_KEY`, `REALTIME_MODEL` (plus `AZURE_OPENAI_ENDPOINT` only if using Azure OpenAI),
+   and set `HOST=0.0.0.0`.
    ACA gives you an `https://…` URL with WebSockets by default. ✅
 
 ### Option B — Azure App Service (Web App for Containers or Python)
@@ -165,6 +167,6 @@ docker run -p 8000:8000 --env-file .env ai-voice-presenter
 - **CORS/origins:** the app serves its own frontend, so no cross-origin setup is needed.
 - **Realtime session limits:** long sessions can drop; the frontend auto-reconnects and re-applies the
   deck, but expect an occasional blip on very long talks.
-- **Secrets:** rotate the Azure key if it was ever committed; keep it only in host env vars.
-- **Scaling:** each browser holds one WS to the backend and one backend↔Azure WS. Scale out horizontally;
+- **Secrets:** rotate the API key if it was ever committed or shared; keep it only in host env vars.
+- **Scaling:** each browser holds one WS to the backend and one backend↔OpenAI WS. Scale out horizontally;
   no shared state between connections.

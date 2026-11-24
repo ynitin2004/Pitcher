@@ -1,6 +1,6 @@
 // Phase 6 — stream + play the model's speech in the browser.
 //
-// gpt-realtime sends audio as `response.audio.delta` events: base64-encoded
+// gpt-realtime sends audio as `response.output_audio.delta` events: base64-encoded
 // PCM16, 24 kHz, mono, little-endian. Browsers can't feed a live stream to an
 // <audio> tag easily, so we use the Web Audio API: decode each chunk to a small
 // AudioBuffer and schedule it back-to-back on a running clock (`nextTime`) so the

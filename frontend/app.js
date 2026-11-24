@@ -240,8 +240,18 @@
 
   // ---- Topic generation ----
   let generating = false;
+  let genTimer = null;
   function setGenerating(on) {
     generating = on;
+    // Safety net: never leave the button stuck on "Generating…" forever.
+    clearTimeout(genTimer);
+    if (on) {
+      genTimer = setTimeout(() => {
+        if (!generating) return;
+        setGenerating(false);
+        topicMsg.textContent = "⚠ That took too long — please try again.";
+      }, 90000);
+    }
     generateBtn.disabled = on;
     topicInput.disabled = on;
     if (fileInput) fileInput.disabled = on;
