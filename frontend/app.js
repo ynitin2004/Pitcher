@@ -250,7 +250,7 @@
         if (!generating) return;
         setGenerating(false);
         topicMsg.textContent = "⚠ That took too long — please try again.";
-      }, 90000);
+      }, 150000);  // > backend worst case (2 attempts x 45s + connect)
     }
     generateBtn.disabled = on;
     topicInput.disabled = on;
