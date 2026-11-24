@@ -380,9 +380,22 @@ async def ws_endpoint(browser: WebSocket):
         azure = await connect_realtime()
         first = json.loads(await azure.recv())
         print(f"[azure] {first.get('type')}")
+        if first.get("type") == "error":  # e.g. invalid/expired key: OpenAI accepts, then errors
+            err = first.get("error") or {}
+            await azure.close()
+            raise RuntimeError(f"{err.get('code')} {err.get('message')}")
     except Exception as e:
         print(f"[azure] connection failed: {type(e).__name__}: {e}")
-        await browser.send_json({"type": "status", "msg": f"AI connection FAILED: {type(e).__name__}"})
+        detail = str(e).lower()
+        if not API_KEY:
+            msg = "Server is missing its OpenAI API key (set OPENAI_API_KEY)."
+        elif any(k in detail for k in ("401", "403", "api_key", "api key", "unauthorized")):
+            msg = "The AI service rejected the API key (invalid or expired)."
+        else:
+            msg = f"Can't reach the AI service ({type(e).__name__}). Please try again shortly."
+        await browser.send_json({"type": "status", "msg": "AI connection failed"})
+        await browser.send_json({"type": "error", "level": "info", "msg": msg})
+        await browser.close()
         return
 
     state = {
