@@ -3,7 +3,7 @@
 # from the same HTTPS URL, because FastAPI serves frontend/ as static files.
 #
 # Use it: push this repo to GitHub, then in Render click "New +" → "Blueprint"
-# and pick the repo. Render reads this file. Set the two secret values (marked
+# and pick the repo. Render reads this file. Set the secret value (marked
 # sync: false) in the dashboard when prompted.
 services:
   - type: web
@@ -14,13 +14,9 @@ services:
     envVars:
       - key: HOST
         value: 0.0.0.0
-      - key: AZURE_OPENAI_DEPLOYMENT_NAME
+      - key: REALTIME_MODEL
         value: gpt-realtime
-      - key: AZURE_OPENAI_API_VERSION
-        value: 2025-04-01-preview
       - key: REALTIME_VOICE
         value: alloy
-      - key: AZURE_OPENAI_ENDPOINT
-        sync: false          # set in the dashboard
-      - key: AZURE_OPENAI_API_KEY
-        sync: false          # set in the dashboard (secret)
+      - key: OPENAI_API_KEY
+        sync: false          # set in the dashboard (secret, from platform.openai.com)

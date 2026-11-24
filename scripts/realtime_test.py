@@ -1,5 +1,5 @@
 """
-Phase 2 — Prove the Azure OpenAI `gpt-realtime` connection works.
+Phase 2 — Prove the OpenAI `gpt-realtime` connection works (Azure also supported).
 
 This is a TEXT-ONLY test (no audio yet) so we can isolate one thing: can we
 open the Realtime websocket, ask a question, get a streamed text answer, and
@@ -12,7 +12,7 @@ The Realtime API is just JSON events over a websocket. We:
   4. read streamed events  -> `response.text.delta`, function-call events, `response.done`
 
 Run:  python scripts\realtime_test.py
-(Make sure AZURE_OPENAI_API_KEY is filled in .env first.)
+(Make sure OPENAI_API_KEY is filled in .env first.)
 """
 
 import asyncio
@@ -26,10 +26,13 @@ from dotenv import load_dotenv
 # Load .env from the project root (one level up from scripts/)
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
+# Azure if AZURE_OPENAI_ENDPOINT is set, otherwise OpenAI directly (api.openai.com).
 ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip()
-API_KEY = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
-DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-realtime").strip()
-API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-04-01-preview").strip()
+USE_AZURE = bool(ENDPOINT)
+API_KEY = (os.getenv("OPENAI_API_KEY") or os.getenv("AZURE_OPENAI_API_KEY") or "").strip()
+DEPLOYMENT = (
+    os.getenv("REALTIME_MODEL") or os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME") or "gpt-realtime"
+).strip()
 
 # The slide topics the presenter knows about (used in the instructions).
 SLIDES = [
@@ -69,20 +72,22 @@ TOOLS = [
 
 
 def build_url() -> str:
+    if not USE_AZURE:
+        return f"wss://api.openai.com/v1/realtime?model={DEPLOYMENT}"
     host = ENDPOINT.replace("https://", "").replace("http://", "").rstrip("/")
-    return (
-        f"wss://{host}/openai/realtime"
-        f"?api-version={API_VERSION}&deployment={DEPLOYMENT}"
-    )
+    return f"wss://{host}/openai/v1/realtime?model={DEPLOYMENT}"
+
+
+def build_headers() -> dict:
+    if USE_AZURE:
+        return {"api-key": API_KEY}
+    return {"Authorization": f"Bearer {API_KEY}"}
 
 
 def preflight() -> bool:
     ok = True
-    if not ENDPOINT:
-        print("  [x] AZURE_OPENAI_ENDPOINT is missing in .env")
-        ok = False
     if not API_KEY:
-        print("  [x] AZURE_OPENAI_API_KEY is empty in .env  <-- paste your real key here")
+        print("  [x] OPENAI_API_KEY is empty in .env  <-- paste your real key here")
         ok = False
     return ok
 
@@ -157,7 +162,7 @@ async def run_turn(ws, user_text: str):
 
 
 async def main():
-    print("=== Phase 2: Azure gpt-realtime connection test ===")
+    print("=== Phase 2: gpt-realtime connection test ({}) ===".format("Azure" if USE_AZURE else "OpenAI") + "")
     if not preflight():
         print("\nFix the above in .env, then re-run:  python scripts\\realtime_test.py")
         return
@@ -167,7 +172,7 @@ async def main():
 
     try:
         async with websockets.connect(
-            url, additional_headers={"api-key": API_KEY}, max_size=None
+            url, additional_headers=build_headers(), max_size=None
         ) as ws:
             # 1) Wait for the session to be created
             first = json.loads(await ws.recv())
@@ -177,7 +182,8 @@ async def main():
             await send(ws, {
                 "type": "session.update",
                 "session": {
-                    "modalities": ["text"],
+                    "type": "realtime",
+                    "output_modalities": ["text"],
                     "instructions": INSTRUCTIONS,
                     "tools": TOOLS,
                     "tool_choice": "auto",
@@ -225,8 +231,8 @@ async def main():
 
     except websockets.InvalidStatus as e:
         print(f"\n[connection rejected] {e}")
-        print("Common causes: wrong api-key, wrong deployment name, or an api-version")
-        print("your resource doesn't support for gpt-realtime.")
+        print("Common causes: wrong or expired API key, or a model name")
+        print("your account cannot access (check REALTIME_MODEL).")
     except Exception as e:
         print(f"\n[unexpected error] {type(e).__name__}: {e}")
 

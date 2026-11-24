@@ -1,7 +1,7 @@
 # --- Core: the brain + backend ---
-# Azure OpenAI gpt-realtime is reached as JSON events over a websocket,
+# OpenAI gpt-realtime (GA Realtime API) is reached as JSON events over a websocket,
 # so we only need the websockets client — no vendor SDK required.
-websockets
+websockets>=14
 python-dotenv
 fastapi
 uvicorn[standard]
