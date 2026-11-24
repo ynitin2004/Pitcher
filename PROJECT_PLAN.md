@@ -348,3 +348,138 @@ supervision yourself; Render bundles all of that into "connect repo → set env 
 4. **Keep secrets in `.env`** — never paste keys into code or share them.
 5. **Learn the event names.** The whole Realtime API is JSON events over a websocket — print the ones
    you don't handle yet so you always know what the server is saying.
+
+---
+
+# Part 2 — Multi-Agent Deck Studio  🤖🤖🤖
+
+**Goal:** replace the single "write me a deck" call with a **team of agents** that research, structure,
+design, fact-check and coach — so every deck is **sourced and verified**, and the user can **watch the
+agents work live**. The voice presenter (gpt-realtime) stays exactly as it is; it just gets far better
+material to present.
+
+```
+ topic ─► Orchestrator
+            ├─► 🔎 Researcher      web search → facts[] (claim + source URL + quote)
+            ├─► 🧭 Storyteller     facts → narrative arc → 5–6 slide outline (purpose + fact ids)
+            ├─► 🎨 Designer ×N     one per slide, IN PARALLEL → title, bullets, layout, chart data
+            ├─► ✅ Fact-checker    every bullet vs. its cited facts → OK / rewrite / drop (≤2 rounds)
+            └─► 🎤 Coach           speaker notes + likely audience Q&A (grounded in facts)
+                     │
+                     ▼
+            deck (+ sources, notes, Q&A) ─► gpt-realtime presenter (unchanged voice loop)
+            every step streams an `agent_event` to the browser's Agent Panel
+```
+
+## Ground rules for Part 2
+- **Local only for now.** Everything runs and is tested on `http://127.0.0.1:8000`
+  (`python -u backend/main.py`). No deploy work until Part 2 is done.
+- **One agent at a time, CLI first.** Each agent is tested from `scripts/agents_test.py` (no browser)
+  before it's wired into the UI — same rule as Phase 2.
+- **One OpenAI key for everything.** Agents use the **Responses API** (text models, structured JSON
+  output, built-in `web_search` tool) — no extra search API key. Models are env-configurable:
+  `AGENT_MODEL` (quality steps) and `AGENT_FAST_MODEL` (cheap / parallel steps).
+- **Never worse than today.** If the pipeline fails or times out, fall back to the current single-shot
+  generator (`generate_deck`) so the app never dead-ends.
+- **Database = Supabase**, introduced only in Phase 20 (nothing before it depends on a DB).
+
+## Phase 12.5 — Prerequisites (clean slate)  ⬅ do first
+- [ ] 12.5.1 Merge `openai-realtime-ga` into `main`; put a **long-lived** OpenAI key in `.env`
+- [ ] 12.5.2 Fix stale docs: Azure references in this plan, `max_response_output_tokens` →
+      `max_output_tokens` in README, README project layout, remove unused `frontend/slides.js`,
+      mark CORRECTIONS C5.3 (temperature) as removed
+- [ ] 12.5.3 Add `pytest` + `tests/`; first tests for `_parse_deck`, `_normalize_uploaded`, `detect_language`
+
+**Done when:** the local app generates + presents a deck on the new key, and `pytest` passes.
+
+## Phase 13 — Agent runtime foundation
+- [ ] 13.1 `backend/agents/` package; `llm.py` = thin async wrapper over the Responses API:
+      structured output (JSON schema), timeout, 1 retry, **token + cost logging per call**
+- [ ] 13.2 `AgentEvent` (`agent`, `status: started|progress|done|error`, `msg`, `data`) + an async
+      event bus the orchestrator publishes to
+- [ ] 13.3 Backend forwards events to the browser over the existing `/ws` as `{"type":"agent_event",…}`
+- [ ] 13.4 `scripts/agents_test.py` — run one agent or the whole pipeline from the terminal, printing
+      events + final JSON + total cost/time
+
+**Done when:** a dummy "echo" agent returns schema-valid JSON and its events show in the CLI and in the
+browser console.
+
+## Phase 14 — 🔎 Researcher agent
+- [ ] 14.1 Uses the `web_search` tool; returns `facts[]`: `{id, claim, source_title, source_url, quote}`
+- [ ] 14.2 Dedupe, cap at ~20 facts, prefer reputable/primary sources, record the queries used
+- [ ] 14.3 Uploaded `.pptx` text can be passed in as an extra source (own decks need no web)
+- [ ] 14.4 Edge cases: no results → research-free mode (deck flagged "unverified"); unsafe topic → refuse
+
+**Done when:** `agents_test.py research "James Webb telescope"` prints 10–20 facts, each with a real URL.
+
+## Phase 15 — 🧭 Storyteller agent (outline)
+- [ ] 15.1 Input: topic + facts → narrative arc (hook → context → key points → takeaway)
+- [ ] 15.2 Output: 5–6 slides, each `{n, purpose, key_message, fact_ids[], suggested_layout}`
+- [ ] 15.3 Validation: every content slide references ≥1 fact; no unknown fact ids
+
+**Done when:** the outline reads like a talk, not a list, and every slide points to real fact ids.
+
+## Phase 16 — 🎨 Designer agents (parallel)
+- [ ] 16.1 One designer call **per slide via `asyncio.gather`** (`AGENT_FAST_MODEL`)
+- [ ] 16.2 Per slide: `title`, `bullets[]` (each with `fact_ids`), `layout`:
+      `bullets | big_stat | quote | compare | chart`, optional `chart: {type, labels, values}`
+- [ ] 16.3 Frontend renders the new layouts + a **sources footer** per slide + a final **Sources** slide
+- [ ] 16.4 Old decks (quick mode / uploaded .pptx) still render as plain bullets
+
+**Done when:** a 6-slide deck is designed in parallel (wall time ≈ slowest slide, not the sum) and shows
+at least one non-bullet layout with its source.
+
+## Phase 17 — ✅ Fact-checker loop
+- [ ] 17.1 Check each bullet strictly against its cited facts → `supported | partial | unsupported`
+- [ ] 17.2 `unsupported` → back to that slide's designer with the reason (max 2 rounds) → else drop it
+- [ ] 17.3 Deck gets a **verification score** (% bullets supported), shown in the UI
+- [ ] 17.4 Test: inject a fake bullet ("The Moon is 50 km wide") → it must be caught and removed
+
+**Done when:** every bullet in the final deck is `supported`, and the injected fake never survives.
+
+## Phase 18 — 🎤 Coach agent + smarter presenter
+- [ ] 18.1 Speaker notes per slide (spoken style, 2–4 sentences, in the deck's language)
+- [ ] 18.2 5–8 **anticipated audience questions** with grounded answers + fact ids
+- [ ] 18.3 Feed notes + Q&A + facts into the gpt-realtime instructions, so voice answers can say
+      "according to NASA…" and Present Mode narrates from the coach's notes
+- [ ] 18.4 Keep the realtime instructions under a size budget (trim facts if needed)
+
+**Done when:** asking an anticipated question by voice gets a sourced answer, and Present Mode uses the
+coach's notes.
+
+## Phase 19 — 🧠 Orchestrator + live Agent Panel (UI)
+- [ ] 19.1 `orchestrator.py`: Research → Outline → Design (parallel) → Check (loop) → Coach, with
+      per-step timeouts and an overall budget (time + $)
+- [ ] 19.2 **Agent Panel** on the topic screen: a card per agent with live status, log lines, elapsed
+      time; designers appear as per-slide chips filling in
+- [ ] 19.3 Cancel button (stops the pipeline cleanly); **Quick / Studio** toggle (Quick = old generator)
+- [ ] 19.4 Fallback to `generate_deck` on pipeline failure, with a visible notice
+- [ ] 19.5 The `generate` WS message gains `mode: "quick" | "studio"`
+
+**Done when:** you type a topic, watch five agents work live, and land in a verified, sourced deck in
+~60–90 s — or get a clean fallback if anything breaks.
+
+## Phase 20 — 🗄️ Persistence with Supabase
+- [ ] 20.1 Supabase project (cloud free tier, or local via `supabase start`, which needs Docker); keys in
+      `.env` (`SUPABASE_URL`, `SUPABASE_SERVICE_KEY` — server-side only, never sent to the browser)
+- [ ] 20.2 Tables: `decks`, `slides`, `sources`, `agent_runs` (step, status, duration, tokens, cost),
+      `anticipated_qa`
+- [ ] 20.3 Save every studio deck + its run log; **Library** screen reopens past decks instantly
+      (no regeneration cost)
+- [ ] 20.4 App still works with Supabase unset (persistence simply off)
+
+**Done when:** a deck generated yesterday reopens from the Library with its sources and run stats.
+
+## Phase 21 — 📏 Quality, cost & tests
+- [ ] 21.1 Eval set: 10 fixed topics (incl. one Hindi, one unsafe, one very niche)
+- [ ] 21.2 `scripts/eval_studio.py` reports per topic: time, cost, sources, verification score, fallback?
+- [ ] 21.3 `pytest` with a **mocked LLM** for orchestrator logic (retries, loops, timeouts, fallback)
+- [ ] 21.4 Targets: ≤ 90 s per deck, ≥ 90 % bullets supported, cost per deck logged and within budget
+
+**Done when:** the eval runs end-to-end locally and all targets are met.
+
+## Phase 22+ — (next) 🎯 Practice Mode: AI judges grill YOU
+The user presents; judge agents (skeptical investor, technical expert, customer) listen, interrupt with
+questions, and an analyst agent produces a scorecard (clarity, pacing, filler words, weak slides).
+Planned in detail once Part 2 is done — it reuses the agent runtime (13), the Agent Panel (19) and
+Supabase (20).
